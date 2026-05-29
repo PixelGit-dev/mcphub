@@ -386,6 +386,7 @@ export interface BearerKey {
   accessType: BearerKeyAccessType;
   allowedGroups?: string[];
   allowedServers?: string[];
+  createdBy?: string;
 }
 
 // Auth types

@@ -294,6 +294,7 @@ export interface BearerKey {
   accessType: BearerKeyAccessType; // Access scope type
   allowedGroups?: string[]; // Allowed group names when accessType === 'groups' or 'custom'
   allowedServers?: string[]; // Allowed server names when accessType === 'servers' or 'custom'
+  createdBy?: string; // Username that created the key
 }
 
 // Represents the settings for MCP servers

@@ -6,7 +6,13 @@ import { StreamableHTTPServerTransport } from '@modelcontextprotocol/sdk/server/
 import { isInitializeRequest } from '@modelcontextprotocol/sdk/types.js';
 import { deleteMcpServer, getMcpServer } from './mcpService.js';
 import config from '../config/index.js';
-import { getBearerKeyDao, getGroupDao, getServerDao, getSystemConfigDao } from '../dao/index.js';
+import {
+  getBearerKeyDao,
+  getGroupDao,
+  getServerDao,
+  getSystemConfigDao,
+  getUserDao,
+} from '../dao/index.js';
 import { UserContextService } from './userContextService.js';
 import { RequestContextService } from './requestContextService.js';
 import { IUser, BearerKey } from '../types/index.js';
@@ -90,10 +96,46 @@ const normalizeBearerScopeParam = (groupParam?: string): string | undefined => {
   return groupParam;
 };
 
+const isRequestVisibleToBearerKeyCreator = async (
+  paramValue: string | undefined,
+  key: BearerKey,
+): Promise<boolean> => {
+  if (!key.createdBy) {
+    return true;
+  }
+
+  const creator = await getUserDao().findByUsername(key.createdBy);
+  if (!creator || creator.isAdmin) {
+    return true;
+  }
+
+  if (!paramValue) {
+    return false;
+  }
+
+  const [allGroups, allServers] = await Promise.all([getGroupDao().findAll(), getServerDao().findAll()]);
+  const visibleGroups = new Set(
+    allGroups
+      .filter((group) => group.owner === creator.username || group.owner === undefined)
+      .flatMap((group) => [group.id, group.name]),
+  );
+  const visibleServers = new Set(
+    allServers
+      .filter((server) => server.owner === creator.username || server.owner === undefined)
+      .map((server) => server.name),
+  );
+
+  return visibleGroups.has(paramValue) || visibleServers.has(paramValue);
+};
+
 const isBearerKeyAllowedForRequest = async (req: Request, key: BearerKey): Promise<boolean> => {
   const paramValue = normalizeBearerScopeParam((req.params as any)?.group as string | undefined);
 
-  // accessType 'all' allows all requests
+  if (!(await isRequestVisibleToBearerKeyCreator(paramValue, key))) {
+    return false;
+  }
+
+  // accessType 'all' allows all visible requests
   if (key.accessType === 'all') {
     return true;
   }

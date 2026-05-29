@@ -6,6 +6,7 @@ import { Switch } from '@/components/ui/ToggleGroup';
 import { MultiSelect } from '@/components/ui/MultiSelect';
 import { useSettingsData } from '@/hooks/useSettingsData';
 import { useToast } from '@/contexts/ToastContext';
+import { useAuth } from '@/contexts/AuthContext';
 import { generateRandomKey } from '@/utils/key';
 import { PermissionChecker } from '@/components/PermissionChecker';
 import { PERMISSIONS } from '@/constants/permissions';
@@ -18,6 +19,7 @@ import { useGroupData } from '@/hooks/useGroupData';
 interface BearerKeyRowProps {
   keyData: BearerKey;
   loading: boolean;
+  showOwner: boolean;
   availableServers: { value: string; label: string }[];
   availableGroups: { value: string; label: string }[];
   onSave: (
@@ -37,6 +39,7 @@ interface BearerKeyRowProps {
 const BearerKeyRow: React.FC<BearerKeyRowProps> = ({
   keyData,
   loading,
+  showOwner,
   availableServers,
   availableGroups,
   onSave,
@@ -172,7 +175,10 @@ const BearerKeyRow: React.FC<BearerKeyRowProps> = ({
   if (isEditing) {
     return (
       <tr>
-        <td colSpan={5} className="p-0 border-b border-gray-200 dark:border-gray-700">
+        <td
+          colSpan={showOwner ? 6 : 5}
+          className="p-0 border-b border-gray-200 dark:border-gray-700"
+        >
           <div className="bg-gray-50 dark:bg-gray-800 p-5">
             <div className="grid grid-cols-1 md:grid-cols-12 gap-4 mb-4">
               <div className="md:col-span-3">
@@ -353,6 +359,11 @@ const BearerKeyRow: React.FC<BearerKeyRowProps> = ({
       <td className="px-6 py-4 whitespace-nowrap text-sm text-gray-500">
         {formatAccessTypeDisplay(keyData)}
       </td>
+      {showOwner && (
+        <td className="px-6 py-4 whitespace-nowrap text-sm text-gray-500">
+          {keyData.createdBy || '-'}
+        </td>
+      )}
       <td className="px-6 py-4 whitespace-nowrap text-right text-sm font-medium">
         <button
           onClick={() => setIsEditing(true)}
@@ -429,9 +440,12 @@ const DEFAULT_OIDC_SCOPES = ['openid', 'profile', 'email'];
 const SettingsPage: React.FC = () => {
   const { t } = useTranslation();
   const navigate = useNavigate();
+  const { auth } = useAuth();
   const { showToast } = useToast();
   const { allServers: servers } = useServerContext(); // Use allServers for settings (not paginated)
   const { groups } = useGroupData();
+  const isAdmin = !!auth.user?.isAdmin;
+  const showBearerKeyOwnerColumn = isAdmin && bearerKeys.some((key) => !!key.createdBy);
 
   const [installConfig, setInstallConfig] = useState<{
     pythonIndexUrl: string;
@@ -1340,8 +1354,7 @@ const SettingsPage: React.FC = () => {
       </div>
 
       {/* Bearer Keys Settings */}
-      <PermissionChecker permissions={PERMISSIONS.SETTINGS_ROUTE_CONFIG}>
-        <div className="hub-card mb-6 overflow-hidden">
+      <div className="hub-card mb-6 overflow-hidden">
           <div
             className="flex justify-between items-center cursor-pointer transition-colors hover:bg-[var(--hub-surface-hover)] py-3 px-5"
             onClick={() => toggleSection('bearerKeys')}
@@ -1359,7 +1372,9 @@ const SettingsPage: React.FC = () => {
 
           {sectionsVisible.bearerKeys && (
             <div className="space-y-4 pb-4 px-6 pt-4 border-t border-[var(--hub-line-2)]">
-              <div className="flex items-center justify-between p-3 bg-gray-50 dark:bg-gray-800 rounded-md">
+              {isAdmin && (
+                <>
+                  <div className="flex items-center justify-between p-3 bg-gray-50 dark:bg-gray-800 rounded-md">
                 <div>
                   <h3 className="font-medium text-gray-700">
                     {t('settings.enableBearerAuth') || 'Enable Bearer Authentication'}
@@ -1376,9 +1391,9 @@ const SettingsPage: React.FC = () => {
                     handleRoutingConfigChange('enableBearerAuth', checked)
                   }
                 />
-              </div>
+                  </div>
 
-              <div className="p-3 bg-gray-50 dark:bg-gray-800 rounded-md">
+                  <div className="p-3 bg-gray-50 dark:bg-gray-800 rounded-md">
                 <div className="mb-2">
                   <h3 className="font-medium text-gray-700">
                     {t('settings.bearerAuthHeaderName')}
@@ -1386,7 +1401,9 @@ const SettingsPage: React.FC = () => {
                   <p className="text-sm text-gray-500">
                     {t('settings.bearerAuthHeaderNameDescription')}
                   </p>
-                </div>
+                    </div>
+                  </>
+                )}
                 <div className="flex items-center gap-3">
                   <input
                     type="text"
@@ -1475,6 +1492,14 @@ const SettingsPage: React.FC = () => {
                         >
                           {t('settings.bearerKeyAccessType') || 'Access Scope'}
                         </th>
+                        {showBearerKeyOwnerColumn && (
+                          <th
+                            scope="col"
+                            className="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider"
+                          >
+                            {t('users.username') || 'User'}
+                          </th>
+                        )}
                         <th
                           scope="col"
                           className="px-6 py-3 text-right text-xs font-medium text-gray-500 uppercase tracking-wider"
@@ -1489,6 +1514,7 @@ const SettingsPage: React.FC = () => {
                           key={key.id}
                           keyData={key}
                           loading={loading}
+                          showOwner={showBearerKeyOwnerColumn}
                           availableServers={availableServers}
                           availableGroups={availableGroups}
                           onSave={handleSaveExistingBearerKey}
@@ -1705,8 +1731,7 @@ const SettingsPage: React.FC = () => {
               )}
             </div>
           )}
-        </div>
-      </PermissionChecker>
+      </div>
 
       {/* Smart Routing Configuration Settings */}
       <PermissionChecker permissions={PERMISSIONS.SETTINGS_SMART_ROUTING}>

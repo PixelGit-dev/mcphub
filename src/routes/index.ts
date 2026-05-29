@@ -266,7 +266,7 @@ export const initRoutes = async (app: express.Application): Promise<void> => {
   authenticatedRouter.get('/groups/:id/server-configs/:serverName', getGroupServerConfig);
   authenticatedRouter.put('/groups/:id/server-configs/:serverName/tools', updateGroupServerTools);
 
-  // User management routes (admin only)
+  // User management routes 
   authenticatedRouter.get('/users', getUsers);
   authenticatedRouter.get('/users/:username', getUser);
   authenticatedRouter.post('/users', createUser);
@@ -274,7 +274,7 @@ export const initRoutes = async (app: express.Application): Promise<void> => {
   authenticatedRouter.delete('/users/:username', deleteExistingUser);
   authenticatedRouter.get('/users-stats', getUserStats);
 
-  // OAuth Client management routes (admin only)
+  // OAuth Client management routes 
   authenticatedRouter.get('/oauth/clients', getAllClients);
   authenticatedRouter.get('/oauth/clients/:clientId', getClient);
   authenticatedRouter.post(
@@ -289,7 +289,7 @@ export const initRoutes = async (app: express.Application): Promise<void> => {
   authenticatedRouter.delete('/oauth/clients/:clientId', deleteClient);
   authenticatedRouter.post('/oauth/clients/:clientId/regenerate-secret', regenerateSecret);
 
-  // Bearer authentication key management (admin only)
+  // Bearer authentication key management 
   authenticatedRouter.get('/auth/keys', getBearerKeys);
   authenticatedRouter.post('/auth/keys', createBearerKey);
   authenticatedRouter.put('/auth/keys/:id', updateBearerKey);

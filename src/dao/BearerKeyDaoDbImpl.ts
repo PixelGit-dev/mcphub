@@ -21,6 +21,7 @@ export class BearerKeyDaoDbImpl implements BearerKeyDao {
       accessType: entity.accessType,
       allowedGroups: entity.allowedGroups ?? [],
       allowedServers: entity.allowedServers ?? [],
+      createdBy: entity.createdBy,
     };
   }
 
@@ -52,6 +53,7 @@ export class BearerKeyDaoDbImpl implements BearerKeyDao {
       accessType: data.accessType,
       allowedGroups: data.allowedGroups ?? [],
       allowedServers: data.allowedServers ?? [],
+      createdBy: data.createdBy,
     } as any);
     return this.toModel(entity as any);
   }
@@ -67,6 +69,7 @@ export class BearerKeyDaoDbImpl implements BearerKeyDao {
       accessType: data.accessType,
       allowedGroups: data.allowedGroups,
       allowedServers: data.allowedServers,
+      createdBy: data.createdBy,
     } as any);
     return entity ? this.toModel(entity as any) : null;
   }

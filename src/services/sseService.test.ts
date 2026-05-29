@@ -50,6 +50,9 @@ jest.mock('../dao/index.js', () => ({
   getSystemConfigDao: jest.fn(() => ({
     get: jest.fn().mockImplementation(() => Promise.resolve(currentSystemConfig)),
   })),
+  getUserDao: jest.fn(() => ({
+    findByUsername: jest.fn().mockResolvedValue({ username: 'alice', isAdmin: false }),
+  })),
   getBearerKeyDao: jest.fn(() => ({
     // Keep these unit tests aligned with legacy routing semantics:
     // enableBearerAuth + bearerAuthKey -> one enabled key (token=bearerAuthKey)
@@ -75,10 +78,12 @@ jest.mock('../dao/index.js', () => ({
     }),
   })),
   getGroupDao: jest.fn(() => ({
+    findAll: jest.fn().mockResolvedValue([]),
     findByName: jest.fn().mockResolvedValue(null),
     findById: jest.fn().mockResolvedValue(null),
   })),
   getServerDao: jest.fn(() => ({
+    findAll: jest.fn().mockResolvedValue([]),
     findById: jest.fn().mockResolvedValue(null),
   })),
 }));
@@ -390,6 +395,103 @@ describe('sseService', () => {
       const req = createMockRequest({
         headers: { authorization: 'Bearer group-token' },
         params: { group: '$smart/my-group' },
+      });
+      const res = createMockResponse();
+
+      await handleSseConnection(req, res);
+
+      expect(res.status).not.toHaveBeenCalledWith(401);
+      expect(SSEServerTransport).toHaveBeenCalled();
+    });
+
+    it('should deny user-owned all-scope keys outside the creator visibility', async () => {
+      setMockSystemConfig({
+        routing: {
+          enableGlobalRoute: true,
+          enableGroupNameRoute: true,
+          enableBearerAuth: true,
+          bearerAuthKey: 'user-key',
+          skipAuth: false,
+        },
+      });
+
+      (getBearerKeyDao as jest.MockedFunction<any>).mockReturnValueOnce({
+        findEnabled: jest.fn().mockResolvedValue([
+          {
+            id: 'user-key-id',
+            name: 'user-key',
+            token: 'user-key',
+            enabled: true,
+            accessType: 'all',
+            allowedGroups: [],
+            allowedServers: [],
+            createdBy: 'alice',
+          },
+        ]),
+      });
+
+      (getGroupDao as jest.MockedFunction<any>).mockReturnValueOnce({
+        findAll: jest.fn().mockResolvedValue([]),
+        findByName: jest.fn().mockImplementation((name: string) =>
+          name === 'hidden-group'
+            ? Promise.resolve({ id: 'hidden-group-id', name: 'hidden-group', servers: [] })
+            : Promise.resolve(null),
+        ),
+        findById: jest.fn().mockResolvedValue(null),
+      });
+
+      const req = createMockRequest({
+        headers: { authorization: ['Bearer', 'user-key'].join(' ') },
+        params: { group: 'hidden-group' },
+      });
+      const res = createMockResponse();
+
+      await handleSseConnection(req, res);
+
+      expectBearerUnauthorized(res, 'Invalid bearer token');
+    });
+
+    it('should allow user-owned all-scope keys within the creator visibility', async () => {
+      setMockSystemConfig({
+        routing: {
+          enableGlobalRoute: true,
+          enableGroupNameRoute: true,
+          enableBearerAuth: true,
+          bearerAuthKey: 'user-key',
+          skipAuth: false,
+        },
+      });
+
+      (getBearerKeyDao as jest.MockedFunction<any>).mockReturnValueOnce({
+        findEnabled: jest.fn().mockResolvedValue([
+          {
+            id: 'user-key-id',
+            name: 'user-key',
+            token: 'user-key',
+            enabled: true,
+            accessType: 'all',
+            allowedGroups: [],
+            allowedServers: [],
+            createdBy: 'alice',
+          },
+        ]),
+      });
+
+      (getGroupDao as jest.MockedFunction<any>).mockReturnValueOnce({
+        findAll: jest
+          .fn()
+          .mockResolvedValue([{ id: 'visible-group-id', name: 'visible-group', owner: 'alice', servers: [] }]),
+        findByName: jest.fn().mockImplementation((name: string) =>
+          name === 'visible-group'
+            ? Promise.resolve({ id: 'visible-group-id', name: 'visible-group', servers: [] })
+            : Promise.resolve(null),
+        ),
+        findById: jest.fn().mockResolvedValue(null),
+      });
+
+      const req = createMockRequest({
+        headers: { authorization: ['Bearer', 'user-key'].join(' ') },
+        params: { group: 'visible-group' },
       });
       const res = createMockResponse();
 
