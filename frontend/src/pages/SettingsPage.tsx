@@ -1375,61 +1375,60 @@ const SettingsPage: React.FC = () => {
               {isAdmin && (
                 <>
                   <div className="flex items-center justify-between p-3 bg-gray-50 dark:bg-gray-800 rounded-md">
-                <div>
-                  <h3 className="font-medium text-gray-700">
-                    {t('settings.enableBearerAuth') || 'Enable Bearer Authentication'}
-                  </h3>
-                  <p className="text-sm text-gray-500">
-                    {t('settings.enableBearerAuthDescription') ||
-                      'Require bearer token authentication for MCP requests'}
-                  </p>
-                </div>
-                <Switch
-                  disabled={loading}
-                  checked={routingConfig.enableBearerAuth}
-                  onCheckedChange={(checked) =>
-                    handleRoutingConfigChange('enableBearerAuth', checked)
-                  }
-                />
+                    <div>
+                      <h3 className="font-medium text-gray-700">
+                        {t('settings.enableBearerAuth')}
+                      </h3>
+                      <p className="text-sm text-gray-500">
+                        {t('settings.enableBearerAuthDescription') ||
+                          'Require bearer token authentication for MCP requests'}
+                      </p>
+                    </div>
+                    <Switch
+                      disabled={loading}
+                      checked={routingConfig.enableBearerAuth}
+                      onCheckedChange={(checked) =>
+                        handleRoutingConfigChange('enableBearerAuth', checked)
+                      }
+                    />
                   </div>
 
                   <div className="p-3 bg-gray-50 dark:bg-gray-800 rounded-md">
-                <div className="mb-2">
-                  <h3 className="font-medium text-gray-700">
-                    {t('settings.bearerAuthHeaderName')}
-                  </h3>
-                  <p className="text-sm text-gray-500">
-                    {t('settings.bearerAuthHeaderNameDescription')}
-                  </p>
+                    <div className="mb-2">
+                      <h3 className="font-medium text-gray-700">
+                        {t('settings.bearerAuthHeaderName')}
+                      </h3>
+                      <p className="text-sm text-gray-500">
+                        {t('settings.bearerAuthHeaderNameDescription')}
+                      </p>
                     </div>
-                  </>
-                )}
-                <div className="flex items-center gap-3">
-                  <input
-                    type="text"
-                    value={tempRoutingConfig.bearerAuthHeaderName}
-                    onChange={(e) =>
-                      handleTempRoutingConfigChange('bearerAuthHeaderName', e.target.value)
-                    }
-                    placeholder={t('settings.bearerAuthHeaderNamePlaceholder')}
-                    className="flex-1 mt-1 block w-full py-2 px-3 border border-gray-300 rounded-md shadow-sm focus:outline-none focus:ring-blue-500 focus:border-blue-500 sm:text-sm form-input"
-                    disabled={loading}
-                  />
-                  <button
-                    onClick={() =>
-                      handleRoutingConfigChange(
-                        'bearerAuthHeaderName',
-                        tempRoutingConfig.bearerAuthHeaderName,
-                      )
-                    }
-                    disabled={loading}
-                    className="hub-btn primary"
-                  >
-                    {t('common.save')}
-                  </button>
-                </div>
-              </div>
-
+                    <div className="flex items-center gap-3">
+                      <input
+                        type="text"
+                        value={tempRoutingConfig.bearerAuthHeaderName}
+                        onChange={(e) =>
+                          handleTempRoutingConfigChange('bearerAuthHeaderName', e.target.value)
+                        }
+                        placeholder={t('settings.bearerAuthHeaderNamePlaceholder')}
+                        className="flex-1 mt-1 block w-full py-2 px-3 border border-gray-300 rounded-md shadow-sm focus:outline-none focus:ring-blue-500 focus:border-blue-500 sm:text-sm form-input"
+                        disabled={loading}
+                      />
+                      <button
+                        onClick={() =>
+                          handleRoutingConfigChange(
+                            'bearerAuthHeaderName',
+                            tempRoutingConfig.bearerAuthHeaderName,
+                          )
+                        }
+                        disabled={loading}
+                        className="hub-btn primary"
+                      >
+                        {t('common.save')}
+                      </button>
+                    </div>
+                  </div>
+                </>
+              )}
               <div className="flex justify-between items-center">
                 <p className="text-sm text-gray-600">
                   {t('settings.bearerKeysSectionDescription') ||

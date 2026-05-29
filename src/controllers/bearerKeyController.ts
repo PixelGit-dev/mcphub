@@ -62,10 +62,10 @@ const normalizeRequestedScopes = async (
 
   const visibleScopes = await getVisibleScopes(user);
   const nextGroups = requestedGroups.filter((group): group is string =>
-    typeof group === 'string' && visibleScopes.groups?.has(group),
+    typeof group === 'string' && (visibleScopes.groups?.has(group) ?? false),
   );
   const nextServers = requestedServers.filter((server): server is string =>
-    typeof server === 'string' && visibleScopes.servers?.has(server),
+    typeof server === 'string' && (visibleScopes.servers?.has(server) ?? false),
   );
 
   if (accessType === 'groups' && requestedGroups.length > 0 && nextGroups.length === 0) {
