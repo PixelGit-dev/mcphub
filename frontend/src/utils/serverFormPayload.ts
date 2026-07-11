@@ -169,6 +169,7 @@ export const buildServerPayload = ({
     description,
     options,
     visibility: formData.visibility ?? 'private',
+    perSessionClient: formData.perSessionClient === true ? true : undefined,
   };
 
   if (serverType === 'openapi') {

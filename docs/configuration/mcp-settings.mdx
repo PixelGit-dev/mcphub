@@ -78,6 +78,7 @@ A server entry has the shape `"<server-name>": ServerConfig`. The relevant field
 | `oauth` | object | no | Upstream OAuth client settings (used when the upstream server requires OAuth). |
 | `enableKeepAlive` | boolean | no | For `sse` / `streamable-http`: enable periodic health checks and automatic reconnect attempts. |
 | `keepAliveInterval` | number | no | Health check and reconnect interval in milliseconds. Defaults to `60000`. |
+| `perSessionClient` | boolean | no | Create a dedicated upstream client per downstream MCP session instead of sharing one connection across all sessions. Use for stateful servers like Playwright. See [Per-session client isolation](#per-session-client-isolation-stateful-servers). |
 | `tools`, `prompts`, `resources` | object | no | Per-item overrides: `{ "<name>": { "enabled": true, "description": "..." } }`. Managed via the dashboard or the per-resource API endpoints. |
 
 ### `type: "stdio"` (default)
@@ -140,6 +141,57 @@ The authoritative definition of every field is the `ServerConfig` type in [src/t
   }
 }
 ```
+
+### Per-session client isolation (stateful servers)
+
+By default MCPHub keeps a **single** upstream connection per server and shares it
+across every downstream MCP session. For stateful servers this means all clients
+share the same state — with Playwright, for example, every session drives the same
+browser instance and its tabs.
+
+Set `perSessionClient: true` to make MCPHub open a **dedicated upstream client per
+downstream session** instead. Each session gets its own connection (and, for
+stdio servers, its own child process), created lazily on first tool call and torn
+down automatically when the session ends.
+
+<Note>
+`perSessionClient` is a **MCPHub-side** setting: it controls how many upstream
+connections MCPHub opens. It is distinct from Playwright MCP's own `--isolated`
+flag, which controls browser-profile isolation on the Playwright side. The two
+pair naturally — enable both for fully isolated browser sessions.
+</Note>
+
+```json
+{
+  "mcpServers": {
+    "playwright": {
+      "type": "streamable-http",
+      "url": "http://playwright-mcp:3000/mcp",
+      "perSessionClient": true
+    }
+  }
+}
+```
+
+Or with a locally spawned Playwright MCP using its `--isolated` flag:
+
+```json
+{
+  "mcpServers": {
+    "playwright": {
+      "command": "npx",
+      "args": ["@playwright/mcp@latest", "--headless", "--isolated"],
+      "perSessionClient": true
+    }
+  }
+}
+```
+
+<Tip>
+Only enable `perSessionClient` for servers that actually hold per-session state.
+It multiplies upstream connections (and stdio child processes) by the number of
+concurrent sessions, so leave it off for stateless servers.
+</Tip>
 
 ### File and System Servers
 

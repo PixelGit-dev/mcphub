@@ -303,6 +303,158 @@ export const getMcpServer = async (sessionId?: string, group?: string): Promise<
 
 export const deleteMcpServer = (sessionId: string): void => {
   delete servers[sessionId];
+  // Clean up any per-session isolated upstream clients for this session
+  cleanupIsolatedSession(sessionId);
+};
+
+/**
+ * Close an isolated upstream client and its transport, killing the whole stdio
+ * process tree (to avoid orphaned wrappers like `npx`) when applicable.
+ */
+const closeIsolatedClient = (serverName: string, client: Client, transport: any): void => {
+  try {
+    client.close();
+  } catch (e) {
+    console.warn(`[${serverName}] Error closing isolated client:`, e);
+  }
+
+  const candidateTransport = transport as { pid?: unknown };
+  const stdioPid = typeof candidateTransport.pid === 'number' ? candidateTransport.pid : null;
+
+  try {
+    transport.close();
+  } catch (e) {
+    console.warn(`[${serverName}] Error closing isolated transport:`, e);
+  }
+
+  // For stdio transports, kill the whole process tree to avoid orphans
+  if (stdioPid) {
+    killStdioProcessTree(serverName, stdioPid);
+  }
+};
+
+/**
+ * Clean up per-session isolated upstream clients for a given session.
+ * Closes all clients and transports, then removes the session entry.
+ */
+const cleanupIsolatedSession = (sessionId: string): void => {
+  const sessionClients = sessionIsolatedClients.get(sessionId);
+  if (sessionClients) {
+    for (const [serverName, { client, transport }] of sessionClients) {
+      closeIsolatedClient(serverName, client, transport);
+    }
+
+    sessionIsolatedClients.delete(sessionId);
+
+    // Clean up any leftover creation locks for this session
+    for (const key of isolatedClientCreationLocks.keys()) {
+      if (key.startsWith(`${sessionId}:`)) {
+        isolatedClientCreationLocks.delete(key);
+      }
+    }
+    console.log(`Cleaned up isolated clients for session: ${sessionId}`);
+  }
+};
+
+/** Helper to write an isolated session upstream client into the tracking map. */
+const setSessionIsolatedClient = (
+  sessionId: string,
+  serverName: string,
+  client: Client,
+  transport: any,
+): void => {
+  let sessionClients = sessionIsolatedClients.get(sessionId);
+  if (!sessionClients) {
+    sessionClients = new Map();
+    sessionIsolatedClients.set(sessionId, sessionClients);
+  }
+  sessionClients.set(serverName, { client, transport });
+};
+
+/**
+ * Get or create a per-session isolated upstream client for a server.
+ * Used when the server has `perSessionClient: true` in its config.
+ * Uses a creation lock to prevent duplicate connections from concurrent calls.
+ */
+const getOrCreateIsolatedClient = async (
+  sessionId: string,
+  serverInfo: ServerInfo,
+): Promise<{ client: Client; transport: any }> => {
+  // Quick check without lock — already exists
+  const sessionClients = sessionIsolatedClients.get(sessionId);
+  if (sessionClients) {
+    const existing = sessionClients.get(serverInfo.name);
+    if (existing) {
+      return existing;
+    }
+  }
+
+  // Use a lock keyed by session+server to prevent concurrent duplicate creation
+  const lockKey = `${sessionId}:${serverInfo.name}`;
+  const existingLock = isolatedClientCreationLocks.get(lockKey);
+  if (existingLock) {
+    return existingLock;
+  }
+
+  const createPromise = (async (): Promise<{ client: Client; transport: any }> => {
+    // Re-check after acquiring the lock — another call may have created it
+    const sessionClientsAfterLock = sessionIsolatedClients.get(sessionId);
+    if (sessionClientsAfterLock) {
+      const existing = sessionClientsAfterLock.get(serverInfo.name);
+      if (existing) {
+        return existing;
+      }
+    }
+
+    const serverConfig = serverInfo.config;
+    if (!serverConfig) {
+      throw new Error(`Server config not found for isolated server: ${serverInfo.name}`);
+    }
+
+    if (!sessionIsolatedClients.has(sessionId)) {
+      sessionIsolatedClients.set(sessionId, new Map());
+    }
+
+    const reservedClients = sessionIsolatedClients.get(sessionId);
+    const transport = await createTransportFromConfig(serverInfo.name, serverConfig);
+    const client = createUpstreamMcpClient(serverInfo.name, () => serverInfo);
+
+    try {
+      await client.connect(transport, serverInfo.options || {});
+    } catch (connectError) {
+      // Connect failed — close the client/transport and kill any spawned
+      // process tree so a failed handshake doesn't leak resources.
+      closeIsolatedClient(serverInfo.name, client, transport);
+      throw connectError;
+    }
+
+    // Guard: the session was cleaned up during the async connect if its map was
+    // deleted (identity no longer matches) — close the just-created connection.
+    if (sessionIsolatedClients.get(sessionId) !== reservedClients) {
+      console.warn(
+        `Session ${sessionId} was deleted during isolated client creation for ${serverInfo.name}, closing new client`,
+      );
+      closeIsolatedClient(serverInfo.name, client, transport);
+      throw new Error(`Session ${sessionId} no longer exists`);
+    }
+
+    setSessionIsolatedClient(sessionId, serverInfo.name, client, transport);
+    console.log(`Created isolated client for session ${sessionId} -> ${serverInfo.name}`);
+
+    return { client, transport };
+  })();
+
+  isolatedClientCreationLocks.set(lockKey, createPromise);
+  // Release the lock once creation settles. The rejection itself is surfaced to
+  // (and handled by) the awaiting caller below; swallow it here so this
+  // bookkeeping chain never becomes an unhandled promise rejection.
+  void createPromise
+    .finally(() => {
+      isolatedClientCreationLocks.delete(lockKey);
+    })
+    .catch(() => undefined);
+
+  return createPromise;
 };
 
 export const notifyToolChanged = async (
@@ -491,6 +643,13 @@ const normalizeResourceForCache = (resource: McpResource): Resource => {
 // Store all server information
 let serverInfos: ServerInfo[] = [];
 
+// Per-session upstream clients for isolated servers (perSessionClient: true).
+// Map<sessionId, Map<serverName, { client, transport }>>
+const sessionIsolatedClients = new Map<string, Map<string, { client: Client; transport: any }>>();
+
+// Locks to prevent concurrent creation of the same isolated client
+const isolatedClientCreationLocks = new Map<string, Promise<any>>();
+
 // Track servers pending a cache-refresh reinstall.
 // Consumed once by createTransportFromConfig on the next reconnect.
 const pendingReinstalls = new Set<string>();
@@ -668,6 +827,11 @@ export const cleanupAllServers = (): void => {
     }
   }
   serverInfos = [];
+
+  // Drain all per-session isolated upstream clients (perSessionClient: true),
+  for (const sessionId of [...sessionIsolatedClients.keys()]) {
+    cleanupIsolatedSession(sessionId);
+  }
 
   // Clear session servers as well
   Object.keys(servers).forEach((sessionId) => {
@@ -1113,69 +1277,87 @@ export const createTransportFromConfig = async (name: string, conf: ServerConfig
   return transport;
 };
 
+
+type IsolatedClientContext = {
+  sessionId: string;
+  client: Client;
+  transport: any;
+};
+
 // Helper function to handle client.callTool with reconnection logic
 const callToolWithReconnect = async (
   serverInfo: ServerInfo,
   toolParams: any,
   options?: any,
   maxRetries: number = 1,
+  isolated?: IsolatedClientContext,
 ): Promise<any> => {
-  if (!serverInfo.client) {
+  // Local, reassignable refs so a reconnect can swap in the new connection for
+  // the next retry attempt. For isolated calls these track the per-session
+  // client/transport; otherwise they mirror the shared serverInfo connection.
+  let client = isolated ? isolated.client : serverInfo.client;
+  let transport = isolated ? isolated.transport : serverInfo.transport;
+  if (!client) {
     throw new Error(`Client not found for server: ${serverInfo.name}`);
   }
 
   for (let attempt = 0; attempt <= maxRetries; attempt++) {
     try {
-      const result = await serverInfo.client.callTool(toolParams, undefined, options || {});
+      const result = await client.callTool(toolParams, undefined, options || {});
       // Check auth error
       checkAuthError(result);
       return result;
     } catch (error: any) {
       const isHttp40xError = isRecoverableHttp4xxError(error);
-      // Only retry for StreamableHTTPClientTransport
-      const isStreamableHttp = serverInfo.transport instanceof StreamableHTTPClientTransport;
-      const isSSE = serverInfo.transport instanceof SSEClientTransport;
-      if (
-        attempt < maxRetries &&
-        serverInfo.transport &&
-        ((isStreamableHttp && isHttp40xError) || isSSE)
-      ) {
+      // Only retry for StreamableHTTPClientTransport and SSE transports
+      const isStreamableHttp = transport instanceof StreamableHTTPClientTransport;
+      const isSSE = transport instanceof SSEClientTransport;
+      if (attempt < maxRetries && transport && ((isStreamableHttp && isHttp40xError) || isSSE)) {
         console.warn(
-          `${isHttp40xError ? 'HTTP 40x error' : 'error'} detected for ${isStreamableHttp ? 'StreamableHTTP' : 'SSE'} server ${serverInfo.name}, attempting reconnection (attempt ${attempt + 1}/${maxRetries + 1})`,
+          `${isHttp40xError ? 'HTTP 40x error' : 'error'} detected for ${isStreamableHttp ? 'StreamableHTTP' : 'SSE'} server ${serverInfo.name}${isolated ? ` (isolated session ${isolated.sessionId})` : ''}, attempting reconnection (attempt ${attempt + 1}/${maxRetries + 1})`,
         );
 
         try {
-          // Close existing connection
-          if (serverInfo.keepAliveIntervalId) {
-            clearInterval(serverInfo.keepAliveIntervalId);
-            serverInfo.keepAliveIntervalId = undefined;
-          }
-
-          serverInfo.client.close();
-          serverInfo.transport.close();
-
           const server = await getServerDao().findById(serverInfo.name);
           if (!server) {
             throw new Error(`Server configuration not found for: ${serverInfo.name}`);
           }
 
-          // Recreate transport using helper function
           const newTransport = await createTransportFromConfig(serverInfo.name, server);
-
-          // Create new client
-          const client = createUpstreamMcpClient(serverInfo.name, () => serverInfo);
+          const newClient = createUpstreamMcpClient(serverInfo.name, () => serverInfo);
 
           // Reconnect with new transport
-          await client.connect(newTransport, serverInfo.options || {});
+          await newClient.connect(newTransport, serverInfo.options || {});
 
-          // Update server info with new client and transport
-          serverInfo.client = client;
-          serverInfo.transport = newTransport;
-          serverInfo.status = 'connected';
+          if (isolated) {
+            // Isolated path: close only this session's stale connection and
+            // replace its entry in the per-session map. Never touch the shared
+            // serverInfo client/transport.
+            try { client.close(); } catch { /* empty */ }
+            try { transport.close(); } catch { /* empty */ }
+            
+            setSessionIsolatedClient(isolated.sessionId, serverInfo.name, newClient, newTransport);
+          } else {
+            // Shared path: tear down and replace the shared connection.
+            if (serverInfo.keepAliveIntervalId) {
+              clearInterval(serverInfo.keepAliveIntervalId);
+              serverInfo.keepAliveIntervalId = undefined;
+            }
+            try { serverInfo.client?.close(); } catch { /* empty */ }
+            try { transport.close(); } catch { /* empty */ }
+
+            serverInfo.client = newClient;
+            serverInfo.transport = newTransport;
+            serverInfo.status = 'connected';
+          }
+
+          // Point the local refs at the new connection for the next attempt.
+          client = newClient;
+          transport = newTransport;
 
           // Reload tools list after reconnection
           try {
-            const tools = await client.listTools({}, serverInfo.options || {});
+            const tools = await newClient.listTools({}, serverInfo.options || {});
             updateServerToolsCache(serverInfo, tools.tools);
           } catch (listToolsError) {
             console.warn('Failed to reload tools after reconnection', {
@@ -1194,8 +1376,11 @@ const callToolWithReconnect = async (
             serverName: serverInfo.name,
             error: summarizeErrorForLogging(reconnectError),
           });
-          serverInfo.status = 'disconnected';
-          serverInfo.error = `Failed to reconnect: ${formatErrorForLogging(reconnectError)}`;
+
+          if (!isolated) {
+            serverInfo.status = 'disconnected';
+            serverInfo.error = `Failed to reconnect: ${formatErrorForLogging(reconnectError)}`;
+          }
 
           // If this was the last attempt, throw the original error
           if (attempt === maxRetries) {
@@ -2600,8 +2785,12 @@ export const handleCallToolRequest = async (request: any, extra: any) => {
       }
 
       // Call the tool on the target server (MCP servers)
-      const client = targetServerInfo.client;
-      if (!client) {
+      // For servers with perSessionClient: true, use a per-session dedicated client
+      let isolatedCtx: IsolatedClientContext | undefined;
+      if (targetServerInfo.config?.perSessionClient && sessionId) {
+        const isolated = await getOrCreateIsolatedClient(sessionId, targetServerInfo);
+        isolatedCtx = { sessionId, client: isolated.client, transport: isolated.transport };
+      } else if (!targetServerInfo.client) {
         throw new Error(`Client not found for server: ${targetServerInfo.name}`);
       }
 
@@ -2612,6 +2801,7 @@ export const handleCallToolRequest = async (request: any, extra: any) => {
         toolName: targetToolName,
         serverName: targetServerInfo.name,
         arguments: summarizeArgumentsForLogging(finalArgs),
+        perSessionClient: !!targetServerInfo.config?.perSessionClient,
       });
 
       const cleanToolName = normalizeToolNameForServer(targetServerInfo.name, targetToolName);
@@ -2623,6 +2813,8 @@ export const handleCallToolRequest = async (request: any, extra: any) => {
           arguments: finalArgs,
         },
         targetServerInfo.options || {},
+        1,
+        isolatedCtx,
       );
       await settleHostedIfNeeded({
         success: !result.isError,
@@ -2771,8 +2963,12 @@ export const handleCallToolRequest = async (request: any, extra: any) => {
     }
 
     // Handle MCP servers
-    const client = serverInfo.client;
-    if (!client) {
+    // For servers with perSessionClient: true, use a per-session dedicated client
+    let isolatedCtx: IsolatedClientContext | undefined;
+    if (serverInfo.config?.perSessionClient && sessionId) {
+      const isolated = await getOrCreateIsolatedClient(sessionId, serverInfo);
+      isolatedCtx = { sessionId, client: isolated.client, transport: isolated.transport };
+    } else if (!serverInfo.client) {
       throw new Error(`Client not found for server: ${serverInfo.name}`);
     }
 
@@ -2782,6 +2978,8 @@ export const handleCallToolRequest = async (request: any, extra: any) => {
       serverInfo,
       { ...request.params, name: cleanToolName },
       serverInfo.options || {},
+      1,
+      isolatedCtx,
     );
     await settleHostedIfNeeded({
       success: !result.isError,

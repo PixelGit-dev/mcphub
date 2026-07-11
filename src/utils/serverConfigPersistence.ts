@@ -177,6 +177,7 @@ export const normalizeServerConfigForPersistence = (config: ServerConfig): Serve
     owner,
     visibility,
     options,
+    perSessionClient: config.perSessionClient === true ? true : undefined,
   };
 
   if (normalizedType === 'openapi') {

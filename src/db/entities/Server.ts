@@ -82,6 +82,9 @@ export class Server {
   @Column({ type: 'simple-json', nullable: true })
   passthroughHeaders?: string[];
 
+  @Column({ type: 'boolean', nullable: true })
+  perSessionClient?: boolean;
+
   @CreateDateColumn({ name: 'created_at', type: 'timestamp' })
   createdAt: Date;
 

@@ -85,6 +85,7 @@ MCPHub 使用几个配置文件：
 | `maxRestarts`  | number  | `5`             | 最大重启次数       |
 | `restartDelay` | number  | `5000`          | 重启间延迟（毫秒） |
 | `stdio`        | string  | `pipe`          | stdio 配置         |
+| `perSessionClient` | boolean | `false`     | 为每个下游 MCP 会话创建独立的上游客户端，而不是在所有会话间共享同一个连接。适用于 Playwright 等有状态服务器。参见[会话级客户端隔离](#会话级客户端隔离有状态服务器)。 |
 
 ## 常见 MCP 服务器示例
 
@@ -119,6 +120,53 @@ MCPHub 使用几个配置文件：
   }
 }
 ```
+
+### 会话级客户端隔离（有状态服务器）
+
+默认情况下，MCPHub 为每个服务器仅保持**一个**上游连接，并在所有下游 MCP 会话间共享。
+对于有状态服务器来说，这意味着所有客户端共享同一份状态——以 Playwright 为例，每个会话都会
+操作同一个浏览器实例及其标签页。
+
+设置 `perSessionClient: true` 可以让 MCPHub 改为**为每个下游会话创建独立的上游客户端**。
+每个会话拥有各自的连接（对于 stdio 服务器，还会拥有各自的子进程），在首次工具调用时惰性创建，
+并在会话结束时自动销毁。
+
+<Note>
+`perSessionClient` 是 **MCPHub 侧**的设置：它控制 MCPHub 打开多少个上游连接。它与 Playwright
+MCP 自身的 `--isolated` 标志不同，后者控制 Playwright 侧的浏览器配置隔离。二者天然互补——同时
+启用即可获得完全隔离的浏览器会话。
+</Note>
+
+```json
+{
+  "mcpServers": {
+    "playwright": {
+      "type": "streamable-http",
+      "url": "http://playwright-mcp:3000/mcp",
+      "perSessionClient": true
+    }
+  }
+}
+```
+
+或者使用本地启动并带有 `--isolated` 标志的 Playwright MCP：
+
+```json
+{
+  "mcpServers": {
+    "playwright": {
+      "command": "npx",
+      "args": ["@playwright/mcp@latest", "--headless", "--isolated"],
+      "perSessionClient": true
+    }
+  }
+}
+```
+
+<Tip>
+仅对真正持有会话级状态的服务器启用 `perSessionClient`。它会让上游连接（以及 stdio 子进程）
+数量随并发会话数成倍增长，因此对无状态服务器请保持关闭。
+</Tip>
 
 ### 文件和系统服务器
 

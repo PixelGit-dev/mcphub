@@ -96,6 +96,32 @@ describe('normalizeServerConfigForPersistence', () => {
     expect(normalized).toHaveProperty('keepAliveInterval', undefined);
   });
 
+  it('preserves an explicitly enabled per-session client', () => {
+    const normalized = normalizeServerConfigForPersistence({
+      type: 'stdio',
+      command: 'npx',
+      args: ['-y', 'demo-server'],
+      perSessionClient: true,
+    });
+
+    expect(normalized).toHaveProperty('perSessionClient', true);
+  });
+
+  it('keeps per-session client present (not merely absent) so unchecking it clears the stored value', () => {
+    // The dashboard drops the key from the JSON payload when unchecked, so the
+    // incoming config has no `perSessionClient`. Normalization must still emit an
+    // explicit key — otherwise the DAO update treats it as "unchanged" and a
+    // previously-enabled server can never be turned off.
+    const normalized = normalizeServerConfigForPersistence({
+      type: 'stdio',
+      command: 'npx',
+      args: ['-y', 'demo-server'],
+    });
+
+    expect(Object.prototype.hasOwnProperty.call(normalized, 'perSessionClient')).toBe(true);
+    expect(normalized).toHaveProperty('perSessionClient', undefined);
+  });
+
   it('normalizes openapi payloads and trims empty values', () => {
     const normalized = normalizeServerConfigForPersistence({
       type: 'openapi',

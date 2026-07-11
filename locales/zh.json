@@ -178,6 +178,8 @@
     "keepAliveDescription": "定期检查远端服务健康状态，并在服务断开后自动尝试重连。",
     "keepAliveInterval": "检查间隔（毫秒）",
     "keepAliveIntervalDescription": "健康检查和自动重连尝试的时间间隔（默认：60000毫秒 = 1分钟）",
+    "perSessionClient": "会话级客户端隔离",
+    "perSessionClientDescription": "为每个会话创建独立的上游连接，而不是在所有会话间共享同一个连接。适用于 Playwright 等有状态服务器。并发会话越多，上游连接数越多。",
     "remove": "移除",
     "toggleError": "切换服务器 {{serverName}} 状态失败",
     "alreadyExists": "服务器 {{serverName}} 已经存在",

@@ -88,6 +88,7 @@ export async function migrateToDatabase(): Promise<boolean> {
             oauth: config.oauth,
             openapi: config.openapi,
             passthroughHeaders: config.passthroughHeaders,
+            perSessionClient: config.perSessionClient,
           });
           console.log(`  - Created server: ${name}`);
         } else {

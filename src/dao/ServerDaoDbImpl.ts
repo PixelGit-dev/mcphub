@@ -94,6 +94,7 @@ export class ServerDaoDbImpl implements ServerDao {
       proxy: entity.proxy,
       openapi: entity.openapi,
       passthroughHeaders: entity.passthroughHeaders,
+      perSessionClient: entity.perSessionClient,
     });
     return this.mapToServerConfig(server);
   }
@@ -144,6 +145,7 @@ export class ServerDaoDbImpl implements ServerDao {
     assignNullable('proxy');
     assignNullable('openapi');
     assignNullable('passthroughHeaders');
+    assignNullable('perSessionClient');
 
     const server = await this.repository.update(name, updateData as any);
     return server ? this.mapToServerConfig(server) : null;
@@ -236,6 +238,7 @@ export class ServerDaoDbImpl implements ServerDao {
     proxy?: Record<string, any>;
     openapi?: Record<string, any>;
     passthroughHeaders?: string[];
+    perSessionClient?: boolean;
   }): ServerConfigWithName {
     return {
       name: server.name,
@@ -259,6 +262,7 @@ export class ServerDaoDbImpl implements ServerDao {
       proxy: server.proxy,
       openapi: server.openapi,
       passthroughHeaders: server.passthroughHeaders,
+      perSessionClient: server.perSessionClient,
     };
   }
 }
