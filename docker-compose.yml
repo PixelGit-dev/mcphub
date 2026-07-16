@@ -1,0 +1,88 @@
+services:
+  postgres:
+    image: pgvector/pgvector:pg17
+    container_name: mcphub-postgres
+    restart: unless-stopped
+
+    environment:
+      POSTGRES_DB: ${POSTGRES_DB:-mcphub}
+      POSTGRES_USER: ${POSTGRES_USER:-mcphub}
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:?Set POSTGRES_PASSWORD in .env}
+
+    volumes:
+      - postgres_data:/var/lib/postgresql/data
+
+    # Do not expose this publicly in production.
+    # Uncomment only if you need direct host access with psql/admin tools.
+    ports:
+      - "127.0.0.1:5432:5432"
+
+    healthcheck:
+      test:
+        [
+          "CMD-SHELL",
+          "pg_isready -U \"$${POSTGRES_USER}\" -d \"$${POSTGRES_DB}\"",
+        ]
+      interval: 10s
+      timeout: 5s
+      retries: 10
+      start_period: 10s
+
+    networks:
+      - mcphub
+
+  mcphub:
+    image: samanhappy/mcphub:latest
+    container_name: mcphub
+    restart: unless-stopped
+
+    depends_on:
+      postgres:
+        condition: service_healthy
+
+    ports:
+      - "${MCPHUB_PORT:-3000}:3000"
+
+    environment:
+      # Smart Routing database
+      DB_URL: postgresql://${POSTGRES_USER:-mcphub}:${POSTGRES_PASSWORD}@postgres:5432/${POSTGRES_DB:-mcphub}
+
+      # Required embedding provider configuration
+      OPENAI_API_KEY: ${OPENAI_API_KEY}
+
+      # Smart Routing
+      SMART_ROUTING_ENABLED: "true"
+      EMBEDDING_MODEL: ${EMBEDDING_MODEL:-text-embedding-3-small}
+      SIMILARITY_THRESHOLD: ${SIMILARITY_THRESHOLD:-0.7}
+      MAX_TOOLS_RETURNED: ${MAX_TOOLS_RETURNED:-10}
+      MIN_QUERY_LENGTH: ${MIN_QUERY_LENGTH:-5}
+      EMBEDDING_BATCH_SIZE: ${EMBEDDING_BATCH_SIZE:-100}
+      EMBEDDING_CACHE_TTL: ${EMBEDDING_CACHE_TTL:-3600}
+
+      # Recommended if you will expose many MCP tools with sizeable schemas.
+      SMART_ROUTING_PROGRESSIVE_DISCLOSURE: ${SMART_ROUTING_PROGRESSIVE_DISCLOSURE:-true}
+
+      # `names` is compact; change to `full` to expose server descriptions/instructions.
+      SMART_ROUTING_SERVER_DESCRIPTION_MODE: ${SMART_ROUTING_SERVER_DESCRIPTION_MODE:-names}
+
+      # Optional: OpenAI-compatible embedding API, e.g. Gemini.
+      OPENAI_API_BASE_URL: ${OPENAI_API_BASE_URL:-}
+
+    volumes:
+      # Your MCP server definitions. Keep it writable only if you manage it
+      # through the MCPHub UI; use :ro for GitOps-managed configuration.
+      - ./mcp_settings.json:/app/mcp_settings.json
+
+      # Persistent MCPHub application state.
+      - mcphub_data:/app/data
+
+    networks:
+      - mcphub
+
+volumes:
+  postgres_data:
+  mcphub_data:
+
+networks:
+  mcphub:
+    name: mcphub
